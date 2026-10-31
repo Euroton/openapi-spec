@@ -1,0 +1,8 @@
+extends:
+  - spectral:oas
+rules:
+  # Operations don't yet have full descriptions/responses; the spec is generated
+  # and we're tracking gaps in source comments, not via spectral errors.
+  operation-description: off
+  operation-tag-defined: warn
+  oas3-api-servers: off

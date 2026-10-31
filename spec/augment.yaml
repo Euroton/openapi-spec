@@ -1,0 +1,279 @@
+# Manual additions to the OpenAPI spec.
+#
+# These endpoints aren't called by the upstream TS web clients (so the extractor
+# can't see them) but are real production Proton API endpoints used by Proton
+# Bridge (the desktop IMAP/SMTP shim). go-proton-api/server/ exposes them all.
+#
+# Type shapes were lifted from go-proton-api:
+#   - MessageActionReq:     message_types.go
+#   - ImportMetadata:       message_import_types.go
+#   - SendStatsReq:         data_type.go
+#   - ObservabilityMetric:  observability_types.go
+#
+# Each operation is tagged `Bridge` so they're easy to slice out for Phase 4
+# (euroton-imap-bridge, currently parked).
+#
+# Merged into the extracted document by `src/cli.ts` after `buildOpenApi`.
+# Conflicts: augment wins (so we can also use this file to correct extractor
+# mistakes one-off, with a comment trail).
+
+tags:
+    - name: Bridge
+
+paths:
+    /mail/v4/messages/import:
+        post:
+            operationId: Bridge_importMessages
+            tags: [Bridge]
+            summary: Bulk-import messages (Bridge only)
+            description: |
+                Multipart upload. Each part is one RFC822 message plus a `Metadata` JSON field
+                keyed by message reference (per-message AddressID, LabelIDs, Unread, Flags).
+                Source: go-proton-api/server/messages.go `handlePutMailMessagesImport`.
+            requestBody:
+                required: true
+                content:
+                    multipart/form-data:
+                        schema:
+                            type: object
+                            properties:
+                                Metadata:
+                                    type: string
+                                    description: JSON-encoded map<string, ImportMetadata>
+            responses:
+                '200':
+                    description: Successful response. Response schema not yet extracted.
+
+    /mail/v4/messages/forward:
+        put:
+            operationId: Bridge_forwardMessages
+            tags: [Bridge]
+            summary: Mark messages as forwarded (Bridge only)
+            description: |
+                Body is `MessageActionReq` (`{ IDs: string[] }`).
+                Source: go-proton-api/server/messages.go `handlePutMailMessagesForwarded`.
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                IDs:
+                                    type: array
+                                    items: { type: string }
+                            required: [IDs]
+            responses:
+                '200':
+                    description: Successful response. Response schema not yet extracted.
+
+    /mail/v4/messages/unforward:
+        put:
+            operationId: Bridge_unforwardMessages
+            tags: [Bridge]
+            summary: Unmark forwarded messages (Bridge only)
+            description: |
+                Body is `MessageActionReq` (`{ IDs: string[] }`).
+                Source: go-proton-api/server/messages.go `handlePutMailMessagesUnforwarded`.
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                IDs:
+                                    type: array
+                                    items: { type: string }
+                            required: [IDs]
+            responses:
+                '200':
+                    description: Successful response. Response schema not yet extracted.
+
+    /mail/v4/messages/ids:
+        get:
+            operationId: Bridge_listMessageIDs
+            tags: [Bridge]
+            summary: List message IDs (Bridge only)
+            description: |
+                Returns message IDs only — lighter than the full GET when paging through
+                a mailbox. Source: go-proton-api/server/messages.go `handleGetMailMessageIDs`.
+            parameters:
+                - name: AfterID
+                  in: query
+                  required: false
+                  schema: { type: string }
+                  description: Cursor — return IDs after this message ID.
+                - name: Limit
+                  in: query
+                  required: true
+                  schema: { type: integer }
+                  description: Max IDs to return.
+            responses:
+                '200':
+                    description: Successful response. Response schema not yet extracted.
+
+    /core/v4/reports/bug/attachments:
+        post:
+            operationId: Bridge_uploadBugReportAttachment
+            tags: [Bridge]
+            summary: Upload bug-report attachment (Bridge only)
+            description: |
+                Multipart upload; requires a `Token` field tied to a CS ticket created via
+                `POST /core/v4/reports/bug`. Each file field is one attachment (logs etc.).
+                Source: go-proton-api/server/reports.go `handlePostReportBugAttachments`.
+            requestBody:
+                required: true
+                content:
+                    multipart/form-data:
+                        schema:
+                            type: object
+                            properties:
+                                Token:
+                                    type: string
+                                    description: CS ticket token (returned by POST /core/v4/reports/bug)
+                            required: [Token]
+            responses:
+                '200':
+                    description: Successful response. Response schema not yet extracted.
+
+    /data/v1/metrics:
+        post:
+            operationId: Bridge_pushObservability
+            tags: [Bridge]
+            summary: Push observability metric (Bridge only)
+            description: |
+                Single `ObservabilityMetric` (Name, Version, Timestamp, Data). Used by
+                Bridge to ship client-side telemetry. Source: go-proton-api/server/router.go
+                routes this to `handleObservabilityPost`.
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                Name:
+                                    type: string
+                                Version:
+                                    type: integer
+                                Timestamp:
+                                    type: integer
+                                    description: Unix timestamp
+                                Data: {}
+                            required: [Name, Version, Timestamp]
+            responses:
+                '200':
+                    description: Successful response. Response schema not yet extracted.
+
+    # VPN read-surface served by euroton-server's vpn module. Not in upstream
+    # `packages/shared/lib/api/*.ts` (the consumers live in
+    # components/.../WireGuardConfigurationSection), so the extractor misses them.
+    # VPN is a deferred product area: both routes return inert defaults. Shapes
+    # are ground-truthed from the client (go-proton-api has no VPN routes):
+    #   - CertificateDTO / CertificateListParams: WireGuardConfigurationSection/{Certificate,api}.ts
+    #   - FeatureFlagsConfig:                      WireGuardConfigurationSection/feature.ts
+    /vpn/v1/certificate/all:
+        get:
+            operationId: Vpn_listCertificates
+            tags: [Vpn]
+            summary: List WireGuard device certificates
+            description: |
+                Session-gated. VPN is out of scope, so no certificates are ever issued —
+                the list is always empty and `Total` is 0 regardless of paging/filter
+                params (which are accepted and ignored).
+            parameters:
+                - { name: Offset, in: query, required: false, schema: { type: integer } }
+                - { name: Limit, in: query, required: false, schema: { type: integer } }
+                - name: Mode
+                  in: query
+                  required: false
+                  schema: { type: string, enum: [session, persistent] }
+                - { name: Sort, in: query, required: false, schema: { type: string } }
+                - name: Desc
+                  in: query
+                  required: false
+                  schema: { type: integer, enum: [0, 1] }
+                - name: WithSessions
+                  in: query
+                  required: false
+                  schema: { type: integer, enum: [0, 1] }
+                - { name: BeginID, in: query, required: false, schema: { type: string } }
+            responses:
+                '200':
+                    description: Certificate list (always empty while VPN is deferred).
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    Code: { type: integer, example: 1000 }
+                                    Total: { type: integer, example: 0 }
+                                    Certificates:
+                                        type: array
+                                        items:
+                                            type: object
+                                            properties:
+                                                SerialNumber: { type: string }
+                                                ClientKeyFingerprint: { type: string }
+                                                ClientKey: { type: string }
+                                                Certificate: { type: string }
+                                                ExpirationTime: { type: integer, description: Unix seconds }
+                                                RefreshTime: { type: integer, description: Unix seconds }
+                                                Mode: { type: string, enum: [session, persistent] }
+                                                ServerPublicKeyMode: { type: string, enum: [EC, RSA] }
+                                                ServerPublicKey: { type: string }
+                                                DeviceName: { type: string }
+                                                Features:
+                                                    type: object
+                                                    additionalProperties: true
+                                            required:
+                                                - SerialNumber
+                                                - ClientKeyFingerprint
+                                                - ClientKey
+                                                - Certificate
+                                                - ExpirationTime
+                                                - RefreshTime
+                                                - Mode
+                                                - ServerPublicKeyMode
+                                                - ServerPublicKey
+                                required: [Code, Certificates]
+
+    /vpn/v2/clientconfig:
+        get:
+            operationId: Vpn_getClientConfig
+            tags: [Vpn]
+            summary: VPN client config (feature flags)
+            description: |
+                Intentionally public (no session gate) — Proton's VPN app can bootstrap
+                clientconfig before login. The client reads only `FeatureFlags`; while VPN
+                is deferred all ten flags are `false` so every VPN feature stays hidden.
+                `DefaultPorts`/`ServerRefreshInterval` are returned for completeness but
+                are not read by the client.
+            responses:
+                '200':
+                    description: Inert client config with all feature flags disabled.
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    Code: { type: integer, example: 1000 }
+                                    ServerRefreshInterval: { type: integer, example: 90 }
+                                    DefaultPorts:
+                                        type: object
+                                        additionalProperties: true
+                                    FeatureFlags:
+                                        type: object
+                                        properties:
+                                            NetShield: { type: boolean }
+                                            GuestHoles: { type: boolean }
+                                            ServerRefresh: { type: boolean }
+                                            StreamingServicesLogos: { type: boolean }
+                                            PortForwarding: { type: boolean }
+                                            ModerateNAT: { type: boolean }
+                                            SafeMode: { type: boolean }
+                                            PollNotificationAPI: { type: boolean }
+                                            VpnAccelerator: { type: boolean }
+                                            SmartReconnect: { type: boolean }
+                                required: [Code, FeatureFlags]
